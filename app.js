@@ -1,4 +1,4 @@
-// app.js
+// app.js (обновленная версия для автоматической загрузки)
 import { DataLoader } from './data-loader.js';
 import { GRUModel } from './gru.js';
 
@@ -9,31 +9,23 @@ class StockPredictorApp {
         this.historicalChart = null;
         this.predictionChart = null;
         this.isTraining = false;
-        this.currentFile = null;
         this.predictions = null;
         
         this.initUI();
         this.setupEventListeners();
+        
+        // Автоматически загружаем данные при запуске
+        this.autoLoadData();
     }
 
     initUI() {
         // Initialize status elements
-        document.getElementById('dataStatus').textContent = 'Ready to load CSV file';
+        document.getElementById('dataStatus').textContent = 'Automatically loading data from GitHub...';
         document.getElementById('trainingStatus').textContent = 'Model ready';
     }
 
     setupEventListeners() {
-        // File input
-        document.getElementById('csvFile').addEventListener('change', (e) => {
-            this.currentFile = e.target.files[0];
-            if (this.currentFile) {
-                document.getElementById('fileName').textContent = `Selected: ${this.currentFile.name}`;
-                document.getElementById('loadDataBtn').disabled = false;
-                this.updateStatus('dataStatus', 'File selected. Click "Load & Process Data" to continue', 'info');
-            }
-        });
-
-        // Load data button
+        // Кнопка для перезагрузки данных
         document.getElementById('loadDataBtn').addEventListener('click', () => {
             this.loadData();
         });
@@ -55,37 +47,62 @@ class StockPredictorApp {
         });
     }
 
+    async autoLoadData() {
+        try {
+            this.updateStatus('dataStatus', '📥 Loading data from GitHub repository...', 'info');
+            
+            // Загружаем данные автоматически
+            await this.dataLoader.loadCSVFromGitHub();
+            
+            // Подготавливаем данные
+            this.dataLoader.prepareData();
+            
+            // Включаем кнопки
+            document.getElementById('viewDataBtn').disabled = false;
+            document.getElementById('trainBtn').disabled = false;
+            document.getElementById('loadDataBtn').textContent = '🔄 Reload Data';
+            
+            const summary = this.dataLoader.getDataSummary();
+            this.updateStatus('dataStatus', 
+                `✅ Data loaded successfully from GitHub! ${summary.totalDays} days, ${summary.dateRange}. Last price: $${summary.priceRange.last.toFixed(2)}`,
+                'success'
+            );
+            
+            // Отображаем сводку данных
+            this.displayDataSummary(summary);
+            
+            // Автоматически показываем исторические данные
+            setTimeout(() => {
+                this.displayHistoricalData();
+            }, 500);
+            
+        } catch (error) {
+            this.updateStatus('dataStatus', `❌ Error loading data: ${error.message}`, 'error');
+            console.error('Data loading error:', error);
+        }
+    }
+
     async loadData() {
         try {
-            if (!this.currentFile) {
-                throw new Error('Please select a CSV file first');
-            }
-
-            this.updateStatus('dataStatus', 'Loading CSV file...', 'info');
+            this.updateStatus('dataStatus', 'Reloading data from GitHub...', 'info');
             
-            // Clear previous data
+            // Очищаем предыдущие данные
             this.dataLoader.dispose();
             this.model.dispose();
             this.predictions = null;
             
-            // Load and parse CSV
-            await this.dataLoader.loadCSV(this.currentFile);
-            
-            // Prepare data for training
+            // Загружаем данные заново
+            await this.dataLoader.loadCSVFromGitHub();
             this.dataLoader.prepareData();
-            
-            // Enable buttons
-            document.getElementById('viewDataBtn').disabled = false;
-            document.getElementById('trainBtn').disabled = false;
             
             const summary = this.dataLoader.getDataSummary();
             this.updateStatus('dataStatus', 
-                `✅ Data loaded successfully! ${summary.totalDays} days, ${summary.dateRange}. Returns stats: mean=${summary.returnsStats.mean.toFixed(6)}, std=${summary.returnsStats.std.toFixed(6)}`,
+                `✅ Data reloaded! ${summary.totalDays} days, ${summary.dateRange}`,
                 'success'
             );
             
-            // Display data summary
             this.displayDataSummary(summary);
+            this.displayHistoricalData();
             
         } catch (error) {
             this.updateStatus('dataStatus', `❌ Error: ${error.message}`, 'error');
@@ -123,7 +140,7 @@ class StockPredictorApp {
     displayHistoricalData() {
         const historicalData = this.dataLoader.getHistoricalData();
         if (!historicalData) {
-            this.updateStatus('dataStatus', 'No data available. Load data first.', 'error');
+            this.updateStatus('dataStatus', 'No data available. Loading data...', 'error');
             return;
         }
 
@@ -133,7 +150,7 @@ class StockPredictorApp {
             this.historicalChart.destroy();
         }
         
-        // Create price chart
+        // Создаем график цен
         this.historicalChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -164,7 +181,17 @@ class StockPredictorApp {
                 },
                 scales: {
                     x: {
-                        ticks: { color: '#ffccd5' },
+                        ticks: { 
+                            color: '#ffccd5',
+                            maxTicksLimit: 10,
+                            callback: function(value, index) {
+                                // Показываем только каждую 10-ю дату для читаемости
+                                if (index % Math.ceil(this.chart.data.labels.length / 10) === 0) {
+                                    return this.getLabelForValue(value);
+                                }
+                                return '';
+                            }
+                        },
                         grid: { color: 'rgba(255,255,255,0.1)' }
                     },
                     y: {
@@ -190,13 +217,13 @@ class StockPredictorApp {
             this.isTraining = true;
             this.updateStatus('trainingStatus', 'Building GRU model...', 'info');
             
-            // Show progress bar
+            // Показываем прогресс бар
             const progressBar = document.getElementById('progressBar');
             const progressFill = document.getElementById('progressFill');
             progressBar.classList.add('active');
             progressFill.style.width = '0%';
             
-            // Build model
+            // Строим модель
             this.model.buildModel();
             
             this.updateStatus('trainingStatus', 'Training model... This may take a moment.', 'info');
@@ -227,7 +254,7 @@ class StockPredictorApp {
                         progressBar.classList.remove('active');
                         document.getElementById('predictBtn').disabled = false;
                         
-                        // Evaluate model
+                        // Оцениваем модель
                         const metrics = this.model.evaluate(this.dataLoader.X_test, this.dataLoader.y_test);
                         
                         this.updateStatus('trainingStatus', 
@@ -235,10 +262,10 @@ class StockPredictorApp {
                             'success'
                         );
                         
-                        // Save weights
+                        // Сохраняем веса
                         this.model.saveWeights().catch(console.error);
                         
-                        // Display metrics
+                        // Отображаем метрики
                         this.displayTrainingMetrics(metrics);
                     }
                 }
@@ -280,7 +307,7 @@ class StockPredictorApp {
             
             this.updateStatus('trainingStatus', 'Making predictions for next 5 days...', 'info');
             
-            // Get the most recent window of data
+            // Получаем последнее окно данных
             const normalizedData = this.dataLoader.normalizedData;
             const windowSize = this.model.windowSize;
             
@@ -288,23 +315,25 @@ class StockPredictorApp {
                 throw new Error('Not enough data for prediction');
             }
             
-            // Use the last windowSize data points
+            // Используем последние windowSize точек данных
             const lastWindow = normalizedData.slice(-windowSize);
-            const inputTensor = tf.tensor3d([lastWindow], [1, windowSize, 1]);
+            // Преобразуем в правильный формат для tensor3d
+            const lastWindowFormatted = lastWindow.map(val => [val]);
+            const inputTensor = tf.tensor3d([lastWindowFormatted], [1, windowSize, 1]);
             
-            // Make prediction
+            // Делаем предсказание
             const normalizedPredictions = await this.model.predict(inputTensor);
             inputTensor.dispose();
             
-            // Denormalize predictions
+            // Денормализуем предсказания
             this.predictions = normalizedPredictions[0].map(pred => 
                 this.dataLoader.denormalize(pred)
             );
             
-            // Display predictions
+            // Отображаем предсказания
             this.displayPredictions();
             
-            // Create prediction chart
+            // Создаем график предсказаний
             this.createPredictionChart();
             
             this.updateStatus('trainingStatus', '✅ Predictions generated!', 'success');
@@ -333,8 +362,10 @@ class StockPredictorApp {
             predictionCard.className = 'prediction-card';
             predictionCard.innerHTML = `
                 <div class="prediction-day">Day +${day}</div>
-                <div class="prediction-value">${(predictedReturn * 100).toFixed(4)}%</div>
-                <div class="prediction-change ${predictedReturn >= 0 ? 'positive' : 'negative'}">
+                <div class="prediction-value ${predictedReturn >= 0 ? 'positive' : 'negative'}">
+                    ${(predictedReturn * 100).toFixed(4)}%
+                </div>
+                <div class="prediction-change">
                     Expected price: $${newPrice.toFixed(2)}
                 </div>
             `;
@@ -355,8 +386,8 @@ class StockPredictorApp {
             this.predictionChart.destroy();
         }
         
-        // Prepare data for the chart
-        const lastReturns = historicalData.returns.slice(-20); // Last 20 actual returns
+        // Подготавливаем данные для графика
+        const lastReturns = historicalData.returns.slice(-20); // Последние 20 фактических доходностей
         const predictionReturns = this.predictions;
         
         const labels = [
@@ -366,8 +397,8 @@ class StockPredictorApp {
         ];
         
         const data = [
-            ...lastReturns.map(r => r * 100), // Convert to percentage
-            0, // Today (no return)
+            ...lastReturns.map(r => r * 100), // Конвертируем в проценты
+            0, // Сегодня (нет доходности)
             ...predictionReturns.map(r => r * 100)
         ];
         
@@ -431,19 +462,21 @@ class StockPredictorApp {
 
     updateStatus(elementId, message, type = 'info') {
         const element = document.getElementById(elementId);
-        element.textContent = message;
-        element.className = 'status active';
-        
-        // Add color based on type
-        if (type === 'success') {
-            element.style.borderLeftColor = '#90ee90';
-            element.style.background = 'rgba(144, 238, 144, 0.1)';
-        } else if (type === 'error') {
-            element.style.borderLeftColor = '#ff6b81';
-            element.style.background = 'rgba(220, 53, 69, 0.1)';
-        } else {
-            element.style.borderLeftColor = '#ffccd5';
-            element.style.background = 'rgba(255, 204, 213, 0.1)';
+        if (element) {
+            element.textContent = message;
+            element.className = 'status active';
+            
+            // Добавляем цвет в зависимости от типа
+            if (type === 'success') {
+                element.style.borderLeftColor = '#90ee90';
+                element.style.background = 'rgba(144, 238, 144, 0.1)';
+            } else if (type === 'error') {
+                element.style.borderLeftColor = '#ff6b81';
+                element.style.background = 'rgba(220, 53, 69, 0.1)';
+            } else {
+                element.style.borderLeftColor = '#ffccd5';
+                element.style.background = 'rgba(255, 204, 213, 0.1)';
+            }
         }
     }
 
@@ -460,11 +493,11 @@ class StockPredictorApp {
     }
 }
 
-// Initialize app when DOM is loaded
+// Инициализируем приложение при загрузке DOM
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new StockPredictorApp();
     
-    // Clean up on page unload
+    // Очищаем при разгрузке страницы
     window.addEventListener('beforeunload', () => {
         if (window.app) {
             window.app.dispose();
