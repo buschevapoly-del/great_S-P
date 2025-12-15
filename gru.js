@@ -1,4 +1,4 @@
-// gru.js (сильно упрощенная версия для быстрого обучения)
+// gru.js (исправленная версия с правильным batchSize)
 class GRUModel {
     constructor(windowSize = 60, predictionHorizon = 5) {
         this.windowSize = windowSize;
@@ -9,84 +9,110 @@ class GRUModel {
     }
 
     buildModel() {
-        // Очищаем предыдущую модель
-        if (this.model) {
-            this.model.dispose();
-        }
+        tf.disposeVariables();
         
         this.model = tf.sequential();
         
-        // СУПЕР ПРОСТАЯ архитектура для мгновенного обучения
+        // Первый GRU слой
         this.model.add(tf.layers.gru({
-            units: 16,  // Очень мало нейронов
+            units: 32,
             inputShape: [this.windowSize, 1],
-            returnSequences: false,
-            activation: 'tanh'
+            returnSequences: true,
+            kernelInitializer: 'glorotUniform',
+            dropout: 0.1
         }));
         
-        // Всего один выходной слой
+        // Второй GRU слой
+        this.model.add(tf.layers.gru({
+            units: 16,
+            returnSequences: false,
+            kernelInitializer: 'glorotUniform',
+            dropout: 0.1
+        }));
+        
+        // Dense слой
+        this.model.add(tf.layers.dense({
+            units: 8,
+            activation: 'relu'
+        }));
+        
+        // Выходной слой
         this.model.add(tf.layers.dense({
             units: this.predictionHorizon,
             activation: 'linear'
         }));
         
-        // Компиляция с быстрым оптимизатором
+        // Компиляция модели
         this.model.compile({
-            optimizer: tf.train.sgd(0.1),  // SGD быстрее Adam для простых моделей
-            loss: 'meanSquaredError'
+            optimizer: tf.train.adam(0.001),
+            loss: 'meanSquaredError',
+            metrics: ['mse']
         });
         
-        console.log('Ultra-light model built');
+        console.log('Model built successfully');
         this.isTrained = false;
+        
         return this.model;
     }
 
-    async train(X_train, y_train, epochs = 10, batchSize = 128, callbacks = {}) {
+    async train(X_train, y_train, X_val = null, y_val = null, epochs = 20, batchSize = 32, callbacks = {}) {
         if (!this.model) {
-            this.buildModel();
+            throw new Error('Model not built. Call buildModel() first.');
         }
         
         if (!X_train || !y_train) {
             throw new Error('Training data not provided');
         }
 
+        // Убедимся что batchSize это число, а не тензор
+        if (typeof batchSize !== 'number') {
+            batchSize = 32; // значение по умолчанию
+            console.warn('batchSize не число, установлено 32');
+        }
+        
+        // Убедимся что batchSize положительное целое
+        batchSize = Math.max(1, Math.floor(batchSize));
+        
+        const validationData = X_val && y_val ? [X_val, y_val] : undefined;
+        
+        const fitCallbacks = {
+            onEpochEnd: async (epoch, logs) => {
+                if (callbacks.onEpochEnd) {
+                    callbacks.onEpochEnd(epoch, logs);
+                }
+                
+                // Очистка памяти
+                if (epoch % 5 === 0) {
+                    await tf.nextFrame();
+                }
+            },
+            onTrainEnd: () => {
+                this.isTrained = true;
+                if (callbacks.onTrainEnd) {
+                    callbacks.onTrainEnd();
+                }
+            }
+        };
+
         try {
-            console.log(`Training with ${X_train.shape[0]} samples, batch size ${batchSize}`);
+            console.log(`Starting training with batchSize: ${batchSize}, epochs: ${epochs}`);
+            console.log(`X_train shape: ${X_train.shape}, y_train shape: ${y_train.shape}`);
             
-            const startTime = Date.now();
-            
-            // Обучаем с очень маленьким числом эпох
             this.trainingHistory = await this.model.fit(X_train, y_train, {
                 epochs: epochs,
                 batchSize: batchSize,
-                validationSplit: 0.1,
+                validationData: validationData,
                 verbose: 0,
-                shuffle: false,  // Важно для скорости!
-                callbacks: {
-                    onEpochEnd: async (epoch, logs) => {
-                        // Быстрое обновление UI
-                        if (callbacks.onEpochEnd) {
-                            callbacks.onEpochEnd(epoch, logs);
-                        }
-                        
-                        // Принудительное обновление каждую эпоху
-                        await new Promise(resolve => setTimeout(resolve, 0));
-                    },
-                    onTrainEnd: () => {
-                        this.isTrained = true;
-                        console.log(`Training completed in ${(Date.now() - startTime) / 1000}s`);
-                        if (callbacks.onTrainEnd) {
-                            callbacks.onTrainEnd();
-                        }
-                    }
-                }
+                shuffle: true,
+                callbacks: fitCallbacks
             });
             
+            console.log('Training completed successfully');
+            this.isTrained = true;
             return this.trainingHistory;
         } catch (error) {
-            console.error('Training failed:', error);
-            // Даже при ошибке помечаем как обученную для тестирования
-            this.isTrained = true;
+            console.error('Training error:', error);
+            this.isTrained = false;
             throw error;
         }
     }
@@ -96,11 +122,10 @@ class GRUModel {
             throw new Error('Model not built');
         }
         
-        // Разрешаем предсказания даже если не обучено (для теста)
-        if (!this.isTrained) {
-            console.warn('Model not fully trained, but making prediction anyway');
+        if (!X) {
+            throw new Error('Input data not provided');
         }
-        
+
         try {
             const predictions = this.model.predict(X);
             const predictionsArray = await predictions.array();
@@ -108,19 +133,21 @@ class GRUModel {
             return predictionsArray;
         } catch (error) {
             console.error('Prediction error:', error);
-            // Возвращаем нулевые предсказания если ошибка
-            return [Array(this.predictionHorizon).fill(0)];
+            throw error;
         }
     }
 
     evaluate(X_test, y_test) {
-        if (!this.model || !this.isTrained) {
-            console.warn('Model not trained, returning default metrics');
-            return { loss: 0.01, mse: 0.01, rmse: 0.1 };
+        if (!this.model) {
+            throw new Error('Model not built');
+        }
+        
+        if (!X_test || !y_test) {
+            throw new Error('Test data not provided');
         }
 
         try {
-            const evaluation = this.model.evaluate(X_test, y_test, {batchSize: 128, verbose: 0});
+            const evaluation = this.model.evaluate(X_test, y_test);
             const loss = evaluation[0].arraySync();
             const mse = evaluation[1] ? evaluation[1].arraySync() : loss;
             
@@ -136,7 +163,33 @@ class GRUModel {
             };
         } catch (error) {
             console.error('Evaluation error:', error);
-            return { loss: 0.01, mse: 0.01, rmse: 0.1 };
+            throw error;
+        }
+    }
+
+    async saveWeights() {
+        if (!this.model || !this.isTrained) {
+            throw new Error('Model not trained');
+        }
+        
+        const saveResult = await this.model.save('indexeddb://sp500-gru-model');
+        console.log('Model weights saved:', saveResult);
+        return saveResult;
+    }
+
+    async loadWeights() {
+        try {
+            if (!this.model) {
+                this.buildModel();
+            }
+            
+            await this.model.load('indexeddb://sp500-gru-model');
+            this.isTrained = true;
+            console.log('Model weights loaded');
+            return true;
+        } catch (error) {
+            console.log('No saved weights found or error loading:', error);
+            return false;
         }
     }
 
@@ -145,6 +198,7 @@ class GRUModel {
             this.model.dispose();
             this.model = null;
         }
+        this.trainingHistory = null;
         this.isTrained = false;
     }
 }
