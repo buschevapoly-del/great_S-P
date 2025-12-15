@@ -1,4 +1,4 @@
-<!-- index.html -->
+<!-- index.html (обновленная версия с удаленным файловым загрузчиком) -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -87,22 +87,6 @@
             gap: 12px;
         }
 
-        .file-input-wrapper {
-            position: relative;
-            overflow: hidden;
-            display: inline-block;
-        }
-
-        .file-input-wrapper input[type=file] {
-            position: absolute;
-            left: 0;
-            top: 0;
-            opacity: 0;
-            width: 100%;
-            height: 100%;
-            cursor: pointer;
-        }
-
         .btn {
             background: linear-gradient(45deg, #dc3545, #ff6b81);
             color: white;
@@ -145,7 +129,6 @@
             border-radius: 10px;
             margin: 15px 0;
             border-left: 4px solid #dc3545;
-            display: none;
         }
 
         .status.active {
@@ -227,12 +210,12 @@
         .prediction-value {
             font-size: 1.8rem;
             font-weight: bold;
-            color: #ff6b81;
         }
 
         .prediction-change {
             font-size: 0.9rem;
             margin-top: 5px;
+            color: #ffccd5;
         }
 
         .positive {
@@ -278,6 +261,25 @@
             font-size: 0.9rem;
         }
 
+        .data-source {
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(255, 107, 129, 0.1);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 107, 129, 0.3);
+        }
+
+        .data-source a {
+            color: #ffccd5;
+            text-decoration: none;
+        }
+
+        .data-source a:hover {
+            color: #ff6b81;
+            text-decoration: underline;
+        }
+
         @media (max-width: 768px) {
             .charts {
                 grid-template-columns: 1fr;
@@ -298,26 +300,25 @@
         <header>
             <h1>📈 S&P 500 Returns Predictor</h1>
             <p class="subtitle">Browser-based GRU model for 5-day ahead predictions • Client-side TensorFlow.js</p>
+            <div class="data-source">
+                <p>Data automatically loaded from: 
+                    <a href="https://raw.githubusercontent.com/buschevapoly-del/again/main/my_data.csv" target="_blank">
+                        GitHub Repository
+                    </a>
+                </p>
+            </div>
         </header>
 
         <div class="card">
-            <h2 class="card-title">📁 Data Loading</h2>
+            <h2 class="card-title">📊 Data Management</h2>
             <div class="controls">
                 <div class="control-group">
-                    <div class="file-input-wrapper">
-                        <button class="btn" id="fileButton">📂 Choose CSV File</button>
-                        <input type="file" id="csvFile" accept=".csv">
-                    </div>
-                    <div id="fileName">No file selected</div>
-                </div>
-                
-                <div class="control-group">
-                    <button class="btn" id="loadDataBtn" disabled>📊 Load & Process Data</button>
+                    <button class="btn" id="loadDataBtn">📥 Load Data from GitHub</button>
                     <button class="btn btn-secondary" id="viewDataBtn" disabled>👁️ View Historical Data</button>
                 </div>
             </div>
             
-            <div id="dataStatus" class="status"></div>
+            <div id="dataStatus" class="status">Loading data from GitHub...</div>
         </div>
 
         <div class="card">
@@ -334,7 +335,7 @@
                 </div>
             </div>
             
-            <div id="trainingStatus" class="status"></div>
+            <div id="trainingStatus" class="status">Model ready</div>
             <div class="progress-container">
                 <div id="progressBar" class="progress-bar">
                     <div id="progressFill" class="progress-fill"></div>
@@ -342,7 +343,7 @@
             </div>
         </div>
 
-        <div id="metricsContainer" class="metrics" style="display: none;"></div>
+        <div id="metricsContainer" class="metrics"></div>
 
         <div class="charts">
             <div class="chart-container">
@@ -353,7 +354,7 @@
             </div>
         </div>
 
-        <div id="predictionsContainer" class="predictions" style="display: none;"></div>
+        <div id="predictionsContainer" class="predictions"></div>
 
         <footer>
             <p>Built with TensorFlow.js • Runs entirely in your browser • No data leaves your device</p>
