@@ -1,4 +1,4 @@
-// data-loader.js
+// data-loader.js (исправленная версия с автоматической загрузкой из GitHub)
 class DataLoader {
     constructor() {
         this.data = null;
@@ -13,33 +13,25 @@ class DataLoader {
         this.returns = [];
         this.trainIndices = [];
         this.testIndices = [];
+        this.dataUrl = 'https://raw.githubusercontent.com/buschevapoly-del/again/main/my_data.csv';
     }
 
-    async loadCSV(file) {
-        return new Promise((resolve, reject) => {
-            if (!file) {
-                reject(new Error('No file provided'));
-                return;
+    async loadCSVFromGitHub() {
+        try {
+            this.updateStatus('dataStatus', 'Loading data from GitHub...', 'info');
+            
+            const response = await fetch(this.dataUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
-
-            const reader = new FileReader();
             
-            reader.onload = (event) => {
-                try {
-                    const content = event.target.result;
-                    this.parseCSV(content);
-                    resolve(this.data);
-                } catch (error) {
-                    reject(error);
-                }
-            };
+            const content = await response.text();
+            this.parseCSV(content);
             
-            reader.onerror = () => {
-                reject(new Error('Failed to read file'));
-            };
-            
-            reader.readAsText(file);
-        });
+            return this.data;
+        } catch (error) {
+            throw new Error(`Failed to load data from GitHub: ${error.message}`);
+        }
     }
 
     parseCSV(content) {
@@ -53,8 +45,8 @@ class DataLoader {
             const line = lines[i].trim();
             if (!line) continue;
 
-            // Handle both semicolon and comma separated values
-            const parts = line.includes(';') ? line.split(';') : line.split(',');
+            // Handle semicolon separated values
+            const parts = line.split(';');
             
             if (parts.length >= 2) {
                 const dateStr = parts[0].trim();
@@ -68,7 +60,11 @@ class DataLoader {
         }
 
         // Sort by date
-        parsedData.sort((a, b) => new Date(a.date) - new Date(b.date));
+        parsedData.sort((a, b) => {
+            const dateA = this.parseDate(a.date);
+            const dateB = this.parseDate(b.date);
+            return dateA - dateB;
+        });
         
         // Calculate returns
         for (let i = 1; i < parsedData.length; i++) {
@@ -81,6 +77,15 @@ class DataLoader {
         if (this.data.length < 65) {
             throw new Error(`Insufficient data. Need at least 65 days, got ${this.data.length}`);
         }
+    }
+
+    parseDate(dateStr) {
+        // Parse date in format DD.MM.YYYY
+        const parts = dateStr.split('.');
+        if (parts.length === 3) {
+            return new Date(parts[2], parts[1] - 1, parts[0]);
+        }
+        return new Date(dateStr);
     }
 
     prepareData(windowSize = 60, predictionHorizon = 5, testSplit = 0.2) {
@@ -114,9 +119,16 @@ class DataLoader {
         this.trainIndices = Array.from({ length: splitIdx }, (_, i) => i);
         this.testIndices = Array.from({ length: sequences.length - splitIdx }, (_, i) => i + splitIdx);
 
-        // Convert to tensors
+        // Convert to tensors - исправлено для tensor3d
+        const trainSequences = sequences.slice(0, splitIdx);
+        const testSequences = sequences.slice(splitIdx);
+        
+        // Преобразуем для tensor3d: [[[val1], [val2], ...], ...]
+        const trainSequences3D = trainSequences.map(seq => seq.map(val => [val]));
+        const testSequences3D = testSequences.map(seq => seq.map(val => [val]));
+
         this.X_train = tf.tensor3d(
-            sequences.slice(0, splitIdx),
+            trainSequences3D,
             [splitIdx, windowSize, 1]
         );
         
@@ -126,7 +138,7 @@ class DataLoader {
         );
 
         this.X_test = tf.tensor3d(
-            sequences.slice(splitIdx),
+            testSequences3D,
             [sequences.length - splitIdx, windowSize, 1]
         );
         
@@ -193,6 +205,10 @@ class DataLoader {
                 std: Math.sqrt(this.returns.reduce((sq, n) => sq + Math.pow(n - this.returns.reduce((a, b) => a + b, 0) / this.returns.length, 2), 0) / this.returns.length)
             }
         };
+    }
+
+    updateStatus(elementId, message, type = 'info') {
+        console.log(`${type}: ${message}`);
     }
 
     dispose() {
