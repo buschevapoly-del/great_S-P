@@ -1,4 +1,4 @@
-// app.js (обновленная версия для автоматической загрузки)
+// app.js
 import { DataLoader } from './data-loader.js';
 import { GRUModel } from './gru.js';
 
@@ -19,29 +19,24 @@ class StockPredictorApp {
     }
 
     initUI() {
-        // Initialize status elements
         document.getElementById('dataStatus').textContent = 'Automatically loading data from GitHub...';
         document.getElementById('trainingStatus').textContent = 'Model ready';
     }
 
     setupEventListeners() {
-        // Кнопка для перезагрузки данных
         document.getElementById('loadDataBtn').addEventListener('click', () => {
             this.loadData();
         });
 
-        // View historical data button
         document.getElementById('viewDataBtn').addEventListener('click', () => {
             this.displayHistoricalData();
         });
 
-        // Train model button
         document.getElementById('trainBtn').addEventListener('click', async () => {
             const epochs = parseInt(document.getElementById('epochs').value);
             await this.trainModel(epochs);
         });
 
-        // Predict button
         document.getElementById('predictBtn').addEventListener('click', () => {
             this.makePredictions();
         });
@@ -51,13 +46,9 @@ class StockPredictorApp {
         try {
             this.updateStatus('dataStatus', '📥 Loading data from GitHub repository...', 'info');
             
-            // Загружаем данные автоматически
             await this.dataLoader.loadCSVFromGitHub();
-            
-            // Подготавливаем данные
             this.dataLoader.prepareData();
             
-            // Включаем кнопки
             document.getElementById('viewDataBtn').disabled = false;
             document.getElementById('trainBtn').disabled = false;
             document.getElementById('loadDataBtn').textContent = '🔄 Reload Data';
@@ -68,10 +59,8 @@ class StockPredictorApp {
                 'success'
             );
             
-            // Отображаем сводку данных
             this.displayDataSummary(summary);
             
-            // Автоматически показываем исторические данные
             setTimeout(() => {
                 this.displayHistoricalData();
             }, 500);
@@ -86,12 +75,10 @@ class StockPredictorApp {
         try {
             this.updateStatus('dataStatus', 'Reloading data from GitHub...', 'info');
             
-            // Очищаем предыдущие данные
             this.dataLoader.dispose();
             this.model.dispose();
             this.predictions = null;
             
-            // Загружаем данные заново
             await this.dataLoader.loadCSVFromGitHub();
             this.dataLoader.prepareData();
             
@@ -150,7 +137,6 @@ class StockPredictorApp {
             this.historicalChart.destroy();
         }
         
-        // Создаем график цен
         this.historicalChart = new Chart(ctx, {
             type: 'line',
             data: {
@@ -185,7 +171,6 @@ class StockPredictorApp {
                             color: '#ffccd5',
                             maxTicksLimit: 10,
                             callback: function(value, index) {
-                                // Показываем только каждую 10-ю дату для читаемости
                                 if (index % Math.ceil(this.chart.data.labels.length / 10) === 0) {
                                     return this.getLabelForValue(value);
                                 }
@@ -208,7 +193,7 @@ class StockPredictorApp {
         });
     }
 
-    async trainModel(epochs = 50) {
+    async trainModel(epochs = 20) {
         if (this.isTraining) {
             return;
         }
@@ -217,19 +202,28 @@ class StockPredictorApp {
             this.isTraining = true;
             this.updateStatus('trainingStatus', 'Building GRU model...', 'info');
             
-            // Показываем прогресс бар
             const progressBar = document.getElementById('progressBar');
             const progressFill = document.getElementById('progressFill');
             progressBar.classList.add('active');
             progressFill.style.width = '0%';
             
-            // Строим модель
+            if (!this.dataLoader.X_train) {
+                throw new Error('Training data not loaded. Please load data first.');
+            }
+            
+            console.log('Data shapes:', {
+                X_train: this.dataLoader.X_train.shape,
+                y_train: this.dataLoader.y_train.shape
+            });
+            
             this.model.buildModel();
             
-            this.updateStatus('trainingStatus', 'Training model... This may take a moment.', 'info');
+            this.updateStatus('trainingStatus', `Starting training for ${epochs} epochs...`, 'info');
             
             let currentEpoch = 0;
-            const trainingHistory = await this.model.train(
+            const startTime = Date.now();
+            
+            await this.model.train(
                 this.dataLoader.X_train,
                 this.dataLoader.y_train,
                 this.dataLoader.X_test,
@@ -242,30 +236,30 @@ class StockPredictorApp {
                         const progress = (currentEpoch / epochs) * 100;
                         progressFill.style.width = `${progress}%`;
                         
-                        const status = `Epoch ${currentEpoch}/${epochs} - Loss: ${logs.loss.toFixed(6)}, Val Loss: ${logs.val_loss ? logs.val_loss.toFixed(6) : 'N/A'}`;
+                        const elapsed = (Date.now() - startTime) / 1000;
+                        const timePerEpoch = elapsed / currentEpoch;
+                        const remaining = Math.round(timePerEpoch * (epochs - currentEpoch));
+                        
+                        const status = `🏃‍♂️ Epoch ${currentEpoch}/${epochs} - Loss: ${logs.loss.toFixed(6)} - ~${remaining}s remaining`;
                         this.updateStatus('trainingStatus', status, 'info');
                         
-                        if (currentEpoch % 10 === 0) {
+                        if (currentEpoch % 3 === 0) {
                             tf.nextFrame();
                         }
                     },
                     onTrainEnd: () => {
+                        const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
                         this.isTraining = false;
                         progressBar.classList.remove('active');
                         document.getElementById('predictBtn').disabled = false;
                         
-                        // Оцениваем модель
                         const metrics = this.model.evaluate(this.dataLoader.X_test, this.dataLoader.y_test);
                         
                         this.updateStatus('trainingStatus', 
-                            `✅ Training completed! RMSE: ${metrics.rmse.toFixed(6)} (${(metrics.rmse * 100).toFixed(4)}% returns)`,
+                            `✅ Training completed in ${totalTime}s! RMSE: ${metrics.rmse.toFixed(6)}`,
                             'success'
                         );
                         
-                        // Сохраняем веса
-                        this.model.saveWeights().catch(console.error);
-                        
-                        // Отображаем метрики
                         this.displayTrainingMetrics(metrics);
                     }
                 }
@@ -301,13 +295,12 @@ class StockPredictorApp {
 
     async makePredictions() {
         try {
-            if (!this.model.isTrained) {
+            if (!this.model || !this.model.isTrained) {
                 throw new Error('Model not trained. Please train the model first.');
             }
             
             this.updateStatus('trainingStatus', 'Making predictions for next 5 days...', 'info');
             
-            // Получаем последнее окно данных
             const normalizedData = this.dataLoader.normalizedData;
             const windowSize = this.model.windowSize;
             
@@ -315,25 +308,18 @@ class StockPredictorApp {
                 throw new Error('Not enough data for prediction');
             }
             
-            // Используем последние windowSize точек данных
             const lastWindow = normalizedData.slice(-windowSize);
-            // Преобразуем в правильный формат для tensor3d
             const lastWindowFormatted = lastWindow.map(val => [val]);
             const inputTensor = tf.tensor3d([lastWindowFormatted], [1, windowSize, 1]);
             
-            // Делаем предсказание
             const normalizedPredictions = await this.model.predict(inputTensor);
             inputTensor.dispose();
             
-            // Денормализуем предсказания
             this.predictions = normalizedPredictions[0].map(pred => 
                 this.dataLoader.denormalize(pred)
             );
             
-            // Отображаем предсказания
             this.displayPredictions();
-            
-            // Создаем график предсказаний
             this.createPredictionChart();
             
             this.updateStatus('trainingStatus', '✅ Predictions generated!', 'success');
@@ -386,8 +372,7 @@ class StockPredictorApp {
             this.predictionChart.destroy();
         }
         
-        // Подготавливаем данные для графика
-        const lastReturns = historicalData.returns.slice(-20); // Последние 20 фактических доходностей
+        const lastReturns = historicalData.returns.slice(-20);
         const predictionReturns = this.predictions;
         
         const labels = [
@@ -397,8 +382,8 @@ class StockPredictorApp {
         ];
         
         const data = [
-            ...lastReturns.map(r => r * 100), // Конвертируем в проценты
-            0, // Сегодня (нет доходности)
+            ...lastReturns.map(r => r * 100),
+            0,
             ...predictionReturns.map(r => r * 100)
         ];
         
@@ -466,7 +451,6 @@ class StockPredictorApp {
             element.textContent = message;
             element.className = 'status active';
             
-            // Добавляем цвет в зависимости от типа
             if (type === 'success') {
                 element.style.borderLeftColor = '#90ee90';
                 element.style.background = 'rgba(144, 238, 144, 0.1)';
@@ -493,11 +477,9 @@ class StockPredictorApp {
     }
 }
 
-// Инициализируем приложение при загрузке DOM
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new StockPredictorApp();
     
-    // Очищаем при разгрузке страницы
     window.addEventListener('beforeunload', () => {
         if (window.app) {
             window.app.dispose();
